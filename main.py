@@ -28,7 +28,7 @@ import sqlite3
 
 # ── Import your parser ────────────────────────────────────────────────────────
 # Make sure cibil_parser_v2.py is in the same folder
-from cibil_parser_v2 import parse_cibil_pdf, init_db, save_to_db, POPPLER_PATH
+from cibil_parser_v2 import parse_cibil_pdf, init_db, save_to_db
 
 # ── Config ────────────────────────────────────────────────────────────────────
 DB_PATH      = "cibil.db"
