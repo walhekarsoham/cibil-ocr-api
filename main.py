@@ -69,6 +69,8 @@ async def parse_report(file: UploadFile = File(...)):
     Upload a CIBIL PDF file.
     Returns the full structured JSON and saves to the database.
     """
+    import traceback
+    
     # Validate file type
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are accepted.")
@@ -80,7 +82,9 @@ async def parse_report(file: UploadFile = File(...)):
 
     try:
         # Parse PDF → structured dict
+        print(f"Parsing PDF: {tmp_path}")
         data = parse_cibil_pdf(tmp_path)
+        print(f"PDF parsed successfully, {len(data.get('accounts', {}).get('open_accounts', []))} open accounts found")
 
         # Save to DB
         conn = init_db(DB_PATH)
@@ -96,9 +100,16 @@ async def parse_report(file: UploadFile = File(...)):
         }
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Parsing failed: {str(e)}")
+        error_detail = f"Parsing failed: {str(e)}"
+        print(f"ERROR: {error_detail}")
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=error_detail)
     finally:
-        os.unlink(tmp_path)
+        if os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except:
+                pass
 
 
 # ══════════════════════════════════════════════════════════════════════════════

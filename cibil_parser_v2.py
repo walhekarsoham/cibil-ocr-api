@@ -25,11 +25,25 @@ import pytesseract
 import fitz  # PyMuPDF
 
 def ocr_pdf(pdf_path: str) -> list[str]:
-    doc = fitz.open(pdf_path)
-    pages = []
-    for page in doc:
-        pages.append(page.get_text())
-    return pages
+    """Extract text from PDF using PyMuPDF."""
+    try:
+        doc = fitz.open(pdf_path)
+        if doc.page_count == 0:
+            raise ValueError("PDF has no pages")
+        
+        pages = []
+        for page_num, page in enumerate(doc):
+            try:
+                text = page.get_text()
+                pages.append(text)
+            except Exception as e:
+                print(f"Warning: Error extracting text from page {page_num + 1}: {e}")
+                pages.append("")
+        
+        doc.close()
+        return pages
+    except Exception as e:
+        raise RuntimeError(f"Failed to extract text from PDF: {e}")
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # DATE NORMALISER  DD/MM/YYYY → YYYY-MM-DD
