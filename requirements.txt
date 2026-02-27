@@ -4,3 +4,4 @@ python-multipart
 pytesseract
 Pillow
 pdf2image
+pymupdf
