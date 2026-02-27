@@ -144,7 +144,16 @@ def get_report(report_id: int, conn: sqlite3.Connection = Depends(get_db)):
     addrs   = conn.execute("SELECT * FROM address_details WHERE report_id=?",  (report_id,)).fetchall()
     contact = conn.execute("SELECT * FROM contact_details WHERE report_id=?",  (report_id,)).fetchone()
     employ  = conn.execute("SELECT * FROM employment_details WHERE report_id=?",(report_id,)).fetchone()
-    enqs    = conn.execute("SELECT * FROM enquiries WHERE report_id=?",         (report_id,)).fetchall()
+    enqs    = conn.execute(
+        """
+        SELECT enquiry_date, enquiry_type AS purpose, enquiry_amount
+        FROM enquiries
+        WHERE report_id=?
+        ORDER BY enquiry_date DESC
+        LIMIT 10
+        """,
+        (report_id,)
+    ).fetchall()
 
     # Accounts + payment history
     accounts_rows = conn.execute("SELECT * FROM accounts WHERE report_id=?", (report_id,)).fetchall()
@@ -242,7 +251,13 @@ def get_accounts(report_id: int, conn: sqlite3.Connection = Depends(get_db)):
 @app.get("/reports/{report_id}/enquiries", summary="Get credit enquiries")
 def get_enquiries(report_id: int, conn: sqlite3.Connection = Depends(get_db)):
     rows = conn.execute(
-        "SELECT * FROM enquiries WHERE report_id=? ORDER BY enquiry_date DESC",
+        """
+        SELECT enquiry_date, enquiry_type AS purpose, enquiry_amount
+        FROM enquiries
+        WHERE report_id=?
+        ORDER BY enquiry_date DESC
+        LIMIT 10
+        """,
         (report_id,)
     ).fetchall()
     return {

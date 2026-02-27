@@ -76,6 +76,9 @@ def norm_date(raw: str) -> str | None:
     if not raw or raw.strip() in ("-", "", "None"):
         return None
     raw = raw.strip()
+    m = re.match(r"(\d{4})[/\-\.](\d{1,2})[/\-\.](\d{1,2})", raw)
+    if m:
+        return f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
     m = re.match(r"(\d{1,2})[/\-\.](\d{1,2})[/\-\.](\d{4})", raw)
     if m:
         return f"{m.group(3)}-{int(m.group(2)):02d}-{int(m.group(1)):02d}"
@@ -416,30 +419,49 @@ def parse_accounts(pages: list[str]) -> dict:
 # ═══════════════════════════════════════════════════════════════════════════════
 def parse_enquiries(pages: list[str]) -> list[dict]:
     full_text = "\n".join(pages)
-    section = find(r"ENQUIRY DETAILS([\s\S]+?)(?=End of report|$)", full_text, g=1) or ""
-
-    if "No Enquiry Information Reported" in section:
+    if "No Enquiry Information Reported" in full_text:
         return []
+    lines = [ln.strip() for ln in full_text.splitlines() if ln.strip()]
+    start_idx = 0
+    for idx, line in enumerate(lines):
+        if "ENQUIRY DATE" in line.upper():
+            start_idx = idx
+            break
+    lines = lines[start_idx:]
+
+    date_re = re.compile(r"^(?:\d{4}[-/\.]\d{2}[-/\.]\d{2}|\d{2}[-/\.]\d{2}[-/\.]\d{4})$")
+    amount_re = re.compile(r"^\d[\d,]*(?:\.\d+)?$")
+    skip_purpose = {
+        "ENQUIRY DATE", "ENQUIRY PURPOSE", "ENQUIRY AMOUNT", "MEMBER",
+        "ENQUIRIES", "ENQUIRIES:", "NOT DISCLOSED"
+    }
 
     enquiries = []
-    # Pattern: date  member  account_type  purpose on consecutive lines
-    rows = re.findall(
-        r"(\d{2}/\d{2}/\d{4})\s*\n([A-Z][^\n]{2,50})\s*\n([^\n]{3,50})\s*\n([^\n]{3,50})",
-        section
-    )
-    for dt, member, acct_type, purpose in rows:
-        # Filter out garbage rows (addresses, labels)
-        if any(x in member.upper() for x in ["NAGAR","CITY","TALUKA","ROAD","PLOT","WING"]):
+    for i in range(len(lines) - 2):
+        raw_date = lines[i]
+        purpose = lines[i + 1]
+        raw_amount = lines[i + 2]
+        if not date_re.match(raw_date):
             continue
-        amount_m = re.search(r"(\d{5,})", purpose)
+        if not amount_re.match(raw_amount):
+            continue
+        if purpose.upper() in skip_purpose:
+            continue
+
+        enquiry_date = norm_date(raw_date)
+        enquiry_amount = norm_float(raw_amount)
+        if not enquiry_date or enquiry_amount is None:
+            continue
+
+        amount_value = int(enquiry_amount) if float(enquiry_amount).is_integer() else enquiry_amount
         enquiries.append({
-            "member_name":    member.strip(),
-            "enquiry_date":   norm_date(dt),
-            "enquiry_amount": int(amount_m.group(1)) if amount_m else None,
-            "enquiry_type":   acct_type.strip()
+            "enquiry_date": enquiry_date,
+            "purpose": purpose,
+            "enquiry_amount": amount_value
         })
 
-    return enquiries
+    enquiries.sort(key=lambda x: x["enquiry_date"], reverse=True)
+    return enquiries[:10]
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -651,7 +673,7 @@ def save_to_db(conn: sqlite3.Connection, data: dict) -> int:
     # 9. enquiries
     for enq in data["enquiries"]:
         cur.execute("INSERT INTO enquiries (report_id,member_name,enquiry_date,enquiry_amount,enquiry_type) VALUES (?,?,?,?,?)",
-                    (report_id, enq["member_name"], enq["enquiry_date"], enq["enquiry_amount"], enq["enquiry_type"]))
+                    (report_id, None, enq.get("enquiry_date"), enq.get("enquiry_amount"), enq.get("purpose")))
 
     conn.commit()
     return report_id
