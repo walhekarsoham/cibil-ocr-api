@@ -28,20 +28,29 @@ def ocr_pdf(pdf_path: str) -> list[str]:
 
     pages_text = []
     page_number = 1
+    max_pages = 50  # Limit to prevent infinite loops or excessive processing
 
-    while True:
-        images = convert_from_path(
-            pdf_path,
-            dpi=120,
-            first_page=page_number,
-            last_page=page_number
-        )
+    while page_number <= max_pages:
+        try:
+            images = convert_from_path(
+                pdf_path,
+                dpi=120,
+                first_page=page_number,
+                last_page=page_number
+            )
+        except Exception as e:
+            print(f"Error converting PDF page {page_number}: {e}")
+            break
 
         if not images:
             break
 
-        text = pytesseract.image_to_string(images[0])
-        pages_text.append(text)
+        try:
+            text = pytesseract.image_to_string(images[0])
+            pages_text.append(text)
+        except Exception as e:
+            print(f"Error OCR-ing page {page_number}: {e}")
+            pages_text.append("")  # Add empty text to maintain page count
 
         images[0].close()
         page_number += 1
