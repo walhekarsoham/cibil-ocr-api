@@ -13,10 +13,12 @@ Requirements:
     + Tesseract OCR + Poppler installed on system
 """
 
+import io
 import re, json, sqlite3, argparse
 from datetime import datetime
 from pathlib import Path
 import pytesseract
+from PIL import Image, ImageOps
   # Windows: set to r"D:\Release-25.12.0-0\poppler-25.12.0\Library\bin"
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -24,8 +26,22 @@ import pytesseract
 # ═══════════════════════════════════════════════════════════════════════════════
 import fitz  # PyMuPDF
 
+def _text_quality(text: str) -> int:
+    """A tiny signal to decide if OCR fallback is needed."""
+    if not text:
+        return 0
+    return len(re.findall(r"[A-Za-z0-9]", text))
+
+def _ocr_page_with_tesseract(page: fitz.Page) -> str:
+    """Render a PDF page as image and OCR it with Tesseract."""
+    # 2.5x improves small text recognition in credit report tables.
+    pix = page.get_pixmap(matrix=fitz.Matrix(2.5, 2.5), alpha=False)
+    img = Image.open(io.BytesIO(pix.tobytes("png")))
+    img = ImageOps.autocontrast(ImageOps.grayscale(img))
+    return pytesseract.image_to_string(img, lang="eng", config="--oem 3 --psm 6")
+
 def ocr_pdf(pdf_path: str) -> list[str]:
-    """Extract text from PDF using PyMuPDF."""
+    """Extract text from PDF; fallback to OCR for scanned/image-heavy pages."""
     try:
         doc = fitz.open(pdf_path)
         if doc.page_count == 0:
@@ -34,7 +50,15 @@ def ocr_pdf(pdf_path: str) -> list[str]:
         pages = []
         for page_num, page in enumerate(doc):
             try:
-                text = page.get_text()
+                text = page.get_text("text") or ""
+                # Scanned PDFs often have near-empty text layer.
+                if _text_quality(text) < 40:
+                    try:
+                        ocr_text = _ocr_page_with_tesseract(page)
+                        if _text_quality(ocr_text) >= _text_quality(text):
+                            text = ocr_text
+                    except Exception as ocr_err:
+                        print(f"Warning: OCR fallback failed on page {page_num + 1}: {ocr_err}")
                 pages.append(text)
             except Exception as e:
                 print(f"Warning: Error extracting text from page {page_num + 1}: {e}")
@@ -75,9 +99,15 @@ def find_all(pat, text):
 # 1. REPORT METADATA
 # ═══════════════════════════════════════════════════════════════════════════════
 def parse_report_metadata(pages: list[str]) -> dict:
-    text = pages[0] if pages else ""
-    control = find(r"Control Number\s*[:\-]\s*([\d,\s]+)", text)
-    rdate   = find(r"Date\s*[:\-]\s*([\d/]+)", text)
+    text = "\n".join(pages[:3])
+    control = (
+        find(r"Control Number\s*[:\-]?\s*([\d,\s]{6,})", text) or
+        find(r"Report Control Number\s*[:\-]?\s*([\d,\s]{6,})", text)
+    )
+    rdate = (
+        find(r"Report Date\s*[:\-]?\s*([0-3]?\d[/\-.][0-1]?\d[/\-.]\d{4})", text) or
+        find(r"Date\s*[:\-]?\s*([0-3]?\d[/\-.][0-1]?\d[/\-.]\d{4})", text)
+    )
     return {
         "control_number": control.replace(",", "").replace(" ", "") if control else None,
         "report_date":    norm_date(rdate),
@@ -89,9 +119,15 @@ def parse_report_metadata(pages: list[str]) -> dict:
 # 2. SCORE SUMMARY
 # ═══════════════════════════════════════════════════════════════════════════════
 def parse_score_summary(pages: list[str]) -> dict:
-    text = pages[0] if pages else ""
-    score = find(r"CIBIL Score is\s+(\d{3})", text)
-    sdate = find(r"as of Date\s*[:\-]\s*([\d/]+)", text)
+    text = "\n".join(pages[:4])
+    score = (
+        find(r"(?:CIBIL|CIBII|CICIL)\s*Score(?:\s*is)?\s*[:\-]?\s*(\d{3})", text) or
+        find(r"(?:CIBIL|CIBII|CICIL)\s*Score[\s:\-\n]{0,12}(\d{3})", text)
+    )
+    sdate = (
+        find(r"as of Date\s*[:\-]?\s*([0-3]?\d[/\-.][0-1]?\d[/\-.]\d{4})", text) or
+        find(r"Score Date\s*[:\-]?\s*([0-3]?\d[/\-.][0-1]?\d[/\-.]\d{4})", text)
+    )
     return {
         "cibil_score":     int(score) if score else None,
         "score_date":      norm_date(sdate),
@@ -104,11 +140,15 @@ def parse_score_summary(pages: list[str]) -> dict:
 # 3. PERSONAL DETAILS
 # ═══════════════════════════════════════════════════════════════════════════════
 def parse_personal_details(pages: list[str]) -> dict:
-    text = "\n".join(pages[:2])
-    name   = find(r"Hello,\s+([A-Z][A-Z\s]+?)(?:\n|Your)", text) or \
-             find(r"Name\s*\n([A-Z][^\n]+)", text)
-    dob    = find(r"Date Of Birth\s*[,\n\s]+([\d/]+)", text)
-    gender = find(r"Gender\s+(Male|Female|Transgender|Other)", text)
+    text = "\n".join(pages[:4])
+    name = (
+        find(r"Hello[, ]+\s*([A-Za-z][A-Za-z\s]{2,60}?)(?:\n|Your)", text) or
+        find(r"(?:Name|Consumer Name)\s*[:\-]?\s*\n?\s*([A-Za-z][A-Za-z\s]{2,60})", text)
+    )
+    if name:
+        name = re.sub(r"\s+", " ", name).strip(" ,.-")
+    dob = find(r"Date\s*Of\s*Birth\s*[:\-]?\s*([0-3]?\d[/\-.][0-1]?\d[/\-.]\d{4})", text)
+    gender = find(r"Gender\s*[:\-]?\s*(Male|Female|Transgender|Other)", text)
     return {
         "full_name":     name.strip() if name else None,
         "date_of_birth": norm_date(dob),
