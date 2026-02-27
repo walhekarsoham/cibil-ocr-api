@@ -17,9 +17,7 @@ import re, json, sqlite3, argparse
 from datetime import datetime
 from pathlib import Path
 import pytesseract
-pytesseract.pytesseract.tesseract_cmd = r"D:\Extracter\tesseract.exe"
-
-POPPLER_PATH = r"D:\Release-25.12.0-0\poppler-25.12.0\Library\bin"   # Windows: set to r"D:\Release-25.12.0-0\poppler-25.12.0\Library\bin"
+  # Windows: set to r"D:\Release-25.12.0-0\poppler-25.12.0\Library\bin"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # OCR
@@ -27,12 +25,11 @@ POPPLER_PATH = r"D:\Release-25.12.0-0\poppler-25.12.0\Library\bin"   # Windows: 
 def ocr_pdf(pdf_path: str) -> list[str]:
     from pdf2image import convert_from_path
     import pytesseract
-    kw = {"dpi": 150}
-    if POPPLER_PATH:
-        kw["poppler_path"] = POPPLER_PATH
-    images = convert_from_path(pdf_path, **kw)
-    return [pytesseract.image_to_string(img) for img in images]
 
+    # Cloud-safe version (no Windows paths)
+    images = convert_from_path(pdf_path, dpi=200)
+
+    return [pytesseract.image_to_string(img) for img in images]
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # DATE NORMALISER  DD/MM/YYYY → YYYY-MM-DD
