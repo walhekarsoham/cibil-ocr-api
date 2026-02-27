@@ -26,10 +26,27 @@ def ocr_pdf(pdf_path: str) -> list[str]:
     from pdf2image import convert_from_path
     import pytesseract
 
-    # Cloud-safe version (no Windows paths)
-    images = convert_from_path(pdf_path, dpi=200)
+    pages_text = []
+    page_number = 1
 
-    return [pytesseract.image_to_string(img) for img in images]
+    while True:
+        images = convert_from_path(
+            pdf_path,
+            dpi=120,
+            first_page=page_number,
+            last_page=page_number
+        )
+
+        if not images:
+            break
+
+        text = pytesseract.image_to_string(images[0])
+        pages_text.append(text)
+
+        images[0].close()
+        page_number += 1
+
+    return pages_text
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # DATE NORMALISER  DD/MM/YYYY → YYYY-MM-DD
